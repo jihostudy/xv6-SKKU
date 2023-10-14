@@ -88,7 +88,8 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
-
+  p->nice = 20;
+  
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -531,4 +532,83 @@ procdump(void)
     }
     cprintf("\n");
   }
+}
+
+//getnice systemcall
+int getnice(int pid)
+{
+  struct proc *p;
+  int niceValue;
+
+  if(pid < 1) return -1;
+
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid){
+      niceValue = p->nice;
+      release(&ptable.lock);
+      return niceValue;
+    }
+  }
+  release(&ptable.lock);
+  return -1;
+}
+
+//setnice systemcall
+int setnice(int pid, int value)
+{
+  struct proc *p;
+
+  if(pid < 1) return -1;
+  if(value < 0 || value > 39) return -1;
+  
+  acquire(&ptable.lock);
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->pid == pid){
+      p->nice = value;  
+      //p->weight = weight[value];    
+      release(&ptable.lock);
+      return 0;
+    }
+  }
+  release(&ptable.lock);
+  return -1;
+}
+
+//ps systemcall
+// PA2
+void ps(int pid)
+{
+    static char *states[] = {
+        "UNUSED", //Do not print
+        "EMBRYO",
+        "SLEEPING",
+        "RUNNABLE",
+        "RUNNING",
+        "ZOMBIE"
+    };
+
+    static char *thead[] = {
+        "name",
+        "pid",
+        "state",
+        "priority"
+    };
+
+    struct proc *p;
+    int cnt = 0;
+
+    acquire(&ptable.lock);
+    for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+        if((p->pid == pid) || (pid == 0)) {
+            if(cnt == 0){
+                cprintf("%s\t\t %s\t\t %s\t\t\t   %s\n", thead[0],thead[1],thead[2],thead[3]);
+                cnt++;
+            }
+            if(p->state != 0){
+                cprintf("%s\t\t %d\t\t %s\t\t\t %d\n", p->name, p->pid, states[p->state], p->nice);
+            }
+        }    
+    }
+    release(&ptable.lock);
 }
