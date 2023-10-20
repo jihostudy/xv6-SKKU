@@ -51,6 +51,14 @@ struct proc {
   char name[16];               // Process name (debugging)
 
   int nice;                    // nice value
+  uint weight;                 // weight
+  
+  uint runtime;                // 해당 프로세스 runtime
+  uint sum_runtime;            // total runtime
+  uint vruntime;
+  uint vruntime_overflow;      // max를 초과한 횟수
+
+  uint timeslice;
 };
 
 // Process memory is laid out contiguously, low addresses first:

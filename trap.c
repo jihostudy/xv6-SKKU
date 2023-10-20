@@ -14,6 +14,9 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
+// vruntime maximum limit (int 기준)
+uint VRUNTIME_MAX = 2147483647;
+
 void
 tvinit(void)
 {
@@ -36,6 +39,8 @@ idtinit(void)
 void
 trap(struct trapframe *tf)
 {
+  
+  
   if(tf->trapno == T_SYSCALL){
     if(myproc()->killed)
       exit();
@@ -46,6 +51,8 @@ trap(struct trapframe *tf)
     return;
   }
 
+  
+
   switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:
     if(cpuid() == 0){
@@ -53,7 +60,9 @@ trap(struct trapframe *tf)
       ticks++;
       wakeup(&ticks);
       release(&tickslock);
-    }
+    }  
+    
+    
     lapiceoi();
     break;
   case T_IRQ0 + IRQ_IDE:
@@ -102,9 +111,36 @@ trap(struct trapframe *tf)
 
   // Force process to give up CPU on clock tick.
   // If interrupts were on while locks held, would need to check nlock.
-  if(myproc() && myproc()->state == RUNNING &&
-     tf->trapno == T_IRQ0+IRQ_TIMER)
-    yield();
+  
+  if(myproc() && myproc()->state == RUNNING && tf->trapno == T_IRQ0+IRQ_TIMER){
+    int flag = 0;
+    int temp;
+    // mm 틱마다 runtime 추가
+    myproc()->runtime += 1000;
+    myproc()->sum_runtime += 1000;
+
+    // myproc()->vruntime += 1000 * 1024 / myproc()->weight;
+    
+    // Updating vruntime
+    // Check if overflow occured
+    // 좌변 : uint 이므로 연산에 문제없다
+    if((myproc()->vruntime + 1000 * 1024 / myproc()->weight) > VRUNTIME_MAX) 
+      flag = 1;
+    
+    // Overflow 발생
+    if(flag) {      
+      temp = myproc()->vruntime - VRUNTIME_MAX;      
+      myproc()->vruntime_overflow++;
+      myproc()->vruntime = temp + 1000 * 1024 / myproc()->weight;
+    }
+    // Overflow 발생x
+    else {
+      myproc()->vruntime += 1000 * 1024 / myproc()->weight;      
+    }
+    
+    if(myproc()->runtime >= myproc()->timeslice)
+      yield();
+  }
 
   // Check if the process has been killed since we yielded
   if(myproc() && myproc()->killed && (tf->cs&3) == DPL_USER)

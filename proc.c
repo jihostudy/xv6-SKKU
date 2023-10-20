@@ -12,13 +12,45 @@ struct {
   struct proc proc[NPROC];
 } ptable;
 
+// vruntime maximum limit (int 기준)
+//uint VRUNTIME_MAX = 2147483647;
+
+uint weight[40] = 
+{
+  /*  0 ~ 4  */ 88761,   71755,   56483,   46273,   36291,
+  /*  5 ~ 9  */ 29154,   23254,   18705,   14949,   11916,  
+  /* 10 ~ 14 */  9548,    7620,    6100,    4904,    3906,
+  /* 15 ~ 19 */  3121,    2501,    1991,    1586,    1277,
+  /* 20 ~ 24 */  1024,     820,     655,     526,     423,
+  /* 25 ~ 29 */   335,     272,     215,     172,     137,
+  /* 30 ~ 34 */   110,      87,      70,      56,      45,
+  /* 35 ~ 39 */    36,      29,      23,      18,      15
+};
+
+uint total_weight;
+
 static struct proc *initproc;
 
 int nextpid = 1;
 extern void forkret(void);
 extern void trapret(void);
+// ticks 사용가능하게끔 설정
+extern uint ticks;
 
 static void wakeup1(void *chan);
+
+int get_total_weight() 
+{
+  struct proc* p;
+  int total_weight = 0;
+  //cprintf("weight합구하는중\n");
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->state == RUNNABLE) {
+      total_weight += weight[p->nice];
+    }
+  }
+  return total_weight;
+}
 
 void
 pinit(void)
@@ -88,7 +120,14 @@ allocproc(void)
 found:
   p->state = EMBRYO;
   p->pid = nextpid++;
+  
   p->nice = 20;
+  p->weight = weight[p->nice];
+  p->runtime = 0;
+  p->sum_runtime = 0;
+  p->vruntime = 0;
+  p->vruntime_overflow = 0;
+  p->timeslice = 0;
   
   release(&ptable.lock);
 
@@ -199,6 +238,12 @@ fork(void)
   }
   np->sz = curproc->sz;
   np->parent = curproc;
+  // 부모의 nice, vruntime(overflow 포함) 상속, runtime = 0
+  np->nice = curproc->nice;
+  np->vruntime_overflow = curproc->vruntime_overflow;
+  np->vruntime = curproc->vruntime;
+  np->sum_runtime = 0;
+  np->runtime = 0;
   *np->tf = *curproc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
@@ -262,6 +307,11 @@ exit(void)
     }
   }
 
+  // exit되기 전에 값 저장하기
+  // curproc->sum_runtime += curproc->runtime;
+  // curproc->runtime = 0;
+  // total_weight = 0;
+
   // Jump into the scheduler, never to return.
   curproc->state = ZOMBIE;
   sched();
@@ -320,17 +370,19 @@ wait(void)
 //  - swtch to start running that process
 //  - eventually that process transfers control
 //      via swtch back to the scheduler.
+/*
 void
 scheduler(void)
-{
+{    
   struct proc *p;
   struct cpu *c = mycpu();
+  // Minimum vruntime value process ㅋㅋ  
   c->proc = 0;
-  
-  for(;;){
+  for(;;)
+  {
     // Enable interrupts on this processor.
     sti();
-
+    total_weight = 0;
     // Loop over process table looking for process to run.
     acquire(&ptable.lock);
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
@@ -341,7 +393,7 @@ scheduler(void)
       // to release ptable.lock and then reacquire it
       // before jumping back to us.
       c->proc = p;
-      switchuvm(p);
+      switchuvm(p);struct proc *MVP;
       p->state = RUNNING;
 
       swtch(&(c->scheduler), p->context);
@@ -353,6 +405,71 @@ scheduler(void)
     }
     release(&ptable.lock);
 
+  }
+}
+*/
+// acquire은 함수를 부르기 전에 해서 따로 해줄 필요없다.
+// 2번 하면 Error
+struct proc* minimum_vruntime_process(void) {
+  struct proc* p;
+  struct proc* MVP = 0;  
+  
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->state != RUNNABLE)    
+      continue;
+    if(!MVP || (p->vruntime_overflow <= MVP->vruntime_overflow && p->vruntime < MVP->vruntime)){
+      MVP = p;
+    }
+  }
+  //cprintf("Found minimum Vruntime Process : %s!\n",MVP->name);
+  return MVP;
+}
+
+
+void
+scheduler(void)
+{
+  struct proc *p;
+  struct cpu *c = mycpu();  
+  //struct proc *MVP;
+  c->proc = 0;
+  
+  for(;;){
+    // Enable interrupts on this processor.
+    sti();
+    //MVP = 0;
+    total_weight = get_total_weight();
+
+    // Loop over process table looking for process to run.    
+    acquire(&ptable.lock);        
+    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    //   if(p->state != RUNNABLE)
+    //     continue;
+    //   if(!MVP || p->vruntime < MVP->vruntime)
+    //     MVP = p;
+    // }
+    //p = MVP;
+    p = minimum_vruntime_process();
+    if(p) {      
+      if(total_weight) {
+        p->timeslice = 10000 * p->weight / total_weight;
+      }
+
+      // Switch to chosen process.  It is the process's job
+      // to release ptable.lock and then reacquire it
+      // before jumping back to us.
+      c->proc = p;
+      switchuvm(p);
+      p->state = RUNNING;      
+      
+      swtch(&(c->scheduler), p->context);
+      switchkvm();
+
+      // Process is done running for now.
+      // It should have changed its p->state before coming back.
+      c->proc = 0;
+    }
+    release(&ptable.lock);  
   }
 }
 
@@ -387,6 +504,11 @@ void
 yield(void)
 {
   acquire(&ptable.lock);  //DOC: yieldlock
+
+  //myproc()->sum_runtime += myproc()->runtime;
+  myproc()->runtime = 0;
+  total_weight = 0;
+
   myproc()->state = RUNNABLE;
   sched();
   release(&ptable.lock);
@@ -454,15 +576,61 @@ sleep(void *chan, struct spinlock *lk)
 
 //PAGEBREAK!
 // Wake up all processes sleeping on chan.
-// The ptable lock must be held.
+// struct proc *MVP;The ptable lock must be held.
 static void
 wakeup1(void *chan)
 {
   struct proc *p;
-
-  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
-    if(p->state == SLEEPING && p->chan == chan)
+  
+  struct proc *MVP = 0; // minimum vruntime process
+  int numRunnable = 0;  // false (# Runnable = 0)
+  int vruntime_1tick;
+  // Runnable 존재?
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    if(p->state == RUNNABLE) {
+      numRunnable = 1; // true (존재)
+      break;
+    }        
+  }
+  // 존재한다면, vruntime 최소 찾아
+  if(numRunnable) {
+    MVP = minimum_vruntime_process();
+    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
+    //   if(p->state != RUNNABLE)
+    //     continue;
+    //   if(!MVP || p->vruntime < MVP->vruntime)
+    //     MVP = p;
+    // }
+  }
+  
+  // Update vruntime depending on number of Runnable process and MVP
+  for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
+    if(p->state == SLEEPING && p->chan == chan){
       p->state = RUNNABLE;
+      // no Runnable
+      if(!numRunnable) {
+        p->vruntime_overflow = 0;
+        p->vruntime = 0;
+      }
+      // Runnable Exists
+      else {
+        vruntime_1tick = 1000 * 1024 / p->weight;
+        p->vruntime = MVP->vruntime - vruntime_1tick;
+        // if(MVP->vruntime < vruntime_1tick){
+        //   // 나중에 처리필요
+        //   if(MVP->vruntime_overflow == 0) {
+        //     p->vruntime = 0;
+        //     p->vruntime_overflow = 0;
+        //   }
+        //   // else {
+        //   //   uint temp = vruntime_1tick - MVP->vruntime;
+        //   //   p->vruntime = VRUNTIME_MAX - temp;
+        //   //   p->vruntime_overflow -= 1;
+        //   // }
+        // }        
+      }      
+    }    
+  }
 }
 
 // Wake up all processes sleeping on chan.
@@ -566,7 +734,7 @@ int setnice(int pid, int value)
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
     if(p->pid == pid){
       p->nice = value;  
-      //p->weight = weight[value];    
+      p->weight = weight[value];    
       release(&ptable.lock);
       return 0;
     }
@@ -574,7 +742,38 @@ int setnice(int pid, int value)
   release(&ptable.lock);
   return -1;
 }
-
+// formatting functions
+void format_string(char* input, int output_len) {
+  char output[30];
+  int len = 0;
+  int i = 0;
+  int j;
+  while(input[i] != '\0'){
+    output[i] = input[i];
+    len++;
+    i++;
+  }
+  for(j = len; j < output_len; j++){
+    output[j] = ' ';
+  }
+  output[j] = '\0';
+  cprintf("%s",output);
+} 
+// formatting functions
+void format_int(int input, int output_len) {
+  int copy = input;
+  int len = 0;  
+  int i;
+  while(copy > 0) {
+    len++;
+    copy /= 10;
+  }
+  if(input == 0) len = 1;
+  cprintf("%d", input);
+  for(i = len; i < output_len; i++) {
+    cprintf(" ");
+  }
+}
 //ps systemcall
 // PA2
 void ps(int pid)
@@ -589,11 +788,15 @@ void ps(int pid)
     };
 
     static char *thead[] = {
-        "name",
-        "pid",
-        "state",
-        "priority"
-    };
+      /* 0 */ "name", 
+      /* 1 */ "pid",
+      /* 2 */ "state",
+      /* 3 */ "priority",
+      /* 4 */ "runtime/weight",
+      /* 5 */ "runtime",
+      /* 6 */ "vruntime",
+      /* 7 */ "tick"      
+    };  
 
     struct proc *p;
     int cnt = 0;
@@ -601,14 +804,36 @@ void ps(int pid)
     acquire(&ptable.lock);
     for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
         if((p->pid == pid) || (pid == 0)) {
+            //표 제목 (처음에만 출력)
             if(cnt == 0){
-                cprintf("%s\t\t %s\t\t %s\t\t\t   %s\n", thead[0],thead[1],thead[2],thead[3]);
-                cnt++;
+              format_string(thead[0],10);
+              format_string(thead[1],10);
+              format_string(thead[2],15);
+              format_string(thead[3],15);
+              format_string(thead[4],20);
+              format_string(thead[5],15);
+              format_string(thead[6],20);
+              // cprintf("tick %d\n",ticks*1000);
+
+              //임시코드
+              format_string("timeslice",25);
+              
+              cprintf("tick %d\n",ticks*1000);
+              cnt++;              
             }
             if(p->state != 0){
-                cprintf("%s\t\t %d\t\t %s\t\t\t %d\n", p->name, p->pid, states[p->state], p->nice);
+              format_string(p->name,10);
+              format_int(p->pid,10);
+              format_string(states[p->state],15);
+              format_int(p->nice,15);
+              format_int(p->sum_runtime / p->weight,20);
+              format_int(p->sum_runtime,15);
+              format_int(p->vruntime,20);
+              format_int(p->timeslice,20);
+              cprintf("\n");              
             }
         }    
     }
     release(&ptable.lock);
 }
+
