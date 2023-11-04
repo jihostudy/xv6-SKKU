@@ -8,14 +8,16 @@
 #include "traps.h"
 #include "spinlock.h"
 
+// vruntime maximum limit (int 기준)
+//uint VRUNTIME_MAX = 2147483647;
+
 // Interrupt descriptor table (shared by all CPUs).
 struct gatedesc idt[256];
 extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
-// vruntime maximum limit (int 기준)
-uint VRUNTIME_MAX = 2147483647;
+
 
 void
 tvinit(void)
@@ -117,27 +119,24 @@ trap(struct trapframe *tf)
     int temp;
     // mm 틱마다 runtime 추가
     myproc()->runtime += 1000;
-    myproc()->sum_runtime += 1000;
-
-    // myproc()->vruntime += 1000 * 1024 / myproc()->weight;
+    myproc()->sum_runtime += 1000;    
     
-    // Updating vruntime
+    // Update vruntime
     // Check if overflow occured
-    // 좌변 : uint 이므로 연산에 문제없다
-    if((myproc()->vruntime + 1000 * 1024 / myproc()->weight) > VRUNTIME_MAX) 
+    if((myproc()->vruntime + 1000 * 1024 / myproc()->weight) > (uint)2147483647) 
       flag = 1;
     
-    // Overflow 발생
+    // Overflow 발생 O
     if(flag) {      
-      temp = myproc()->vruntime - VRUNTIME_MAX;      
-      myproc()->vruntime_overflow++;
+      temp = myproc()->vruntime - (uint)2147483647;      
+      myproc()->vruntime_overflow += 1;
       myproc()->vruntime = temp + 1000 * 1024 / myproc()->weight;
     }
-    // Overflow 발생x
+    // Overflow 발생 X
     else {
       myproc()->vruntime += 1000 * 1024 / myproc()->weight;      
     }
-    
+    // Timeslice 사용시 preempt
     if(myproc()->runtime >= myproc()->timeslice)
       yield();
   }

@@ -7,13 +7,15 @@
 #include "proc.h"
 #include "spinlock.h"
 
+
+
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
 } ptable;
 
 // vruntime maximum limit (int 기준)
-//uint VRUNTIME_MAX = 2147483647;
+uint VRUNTIME_MAX = 2147483647;
 
 uint weight[40] = 
 {
@@ -242,8 +244,8 @@ fork(void)
   np->nice = curproc->nice;
   np->vruntime_overflow = curproc->vruntime_overflow;
   np->vruntime = curproc->vruntime;
-  np->sum_runtime = 0;
-  np->runtime = 0;
+  // np->sum_runtime = 0;
+  // np->runtime = 0;
   *np->tf = *curproc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
@@ -430,25 +432,16 @@ void
 scheduler(void)
 {
   struct proc *p;
-  struct cpu *c = mycpu();  
-  //struct proc *MVP;
+  struct cpu *c = mycpu();    
   c->proc = 0;
   
   for(;;){
     // Enable interrupts on this processor.
-    sti();
-    //MVP = 0;
+    sti();    
     total_weight = get_total_weight();
 
     // Loop over process table looking for process to run.    
-    acquire(&ptable.lock);        
-    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++){
-    //   if(p->state != RUNNABLE)
-    //     continue;
-    //   if(!MVP || p->vruntime < MVP->vruntime)
-    //     MVP = p;
-    // }
-    //p = MVP;
+    acquire(&ptable.lock);            
     p = minimum_vruntime_process();
     if(p) {      
       if(total_weight) {
@@ -592,15 +585,9 @@ wakeup1(void *chan)
       break;
     }        
   }
-  // 존재한다면, vruntime 최소 찾아
+  // 존재한다면, vruntime minimum 찾기
   if(numRunnable) {
-    MVP = minimum_vruntime_process();
-    // for(p = ptable.proc; p < &ptable.proc[NPROC]; p++) {
-    //   if(p->state != RUNNABLE)
-    //     continue;
-    //   if(!MVP || p->vruntime < MVP->vruntime)
-    //     MVP = p;
-    // }
+    MVP = minimum_vruntime_process();    
   }
   
   // Update vruntime depending on number of Runnable process and MVP
@@ -615,19 +602,24 @@ wakeup1(void *chan)
       // Runnable Exists
       else {
         vruntime_1tick = 1000 * 1024 / p->weight;
-        p->vruntime = MVP->vruntime - vruntime_1tick;
-        // if(MVP->vruntime < vruntime_1tick){
-        //   // 나중에 처리필요
-        //   if(MVP->vruntime_overflow == 0) {
-        //     p->vruntime = 0;
-        //     p->vruntime_overflow = 0;
-        //   }
-        //   // else {
-        //   //   uint temp = vruntime_1tick - MVP->vruntime;
-        //   //   p->vruntime = VRUNTIME_MAX - temp;
-        //   //   p->vruntime_overflow -= 1;
-        //   // }
-        // }        
+        
+        // vruntime_overflow 수정해야 할때
+        if(MVP->vruntime < vruntime_1tick){
+          // vruntime_overflow = 0, vruntime-vruntime(1tick) < 0 되는 경우 
+          if(MVP->vruntime_overflow == 0) {
+            p->vruntime = 0;
+            p->vruntime_overflow = 0;
+          }
+          else {
+            uint temp = vruntime_1tick - MVP->vruntime;
+            p->vruntime = VRUNTIME_MAX - temp;
+            p->vruntime_overflow -= 1;
+          }
+        }      
+        // vruntime_overflow 수정하지 않아도 될때
+        else {
+          p->vruntime = MVP->vruntime - vruntime_1tick;
+        }  
       }      
     }    
   }
@@ -774,6 +766,55 @@ void format_int(int input, int output_len) {
     cprintf(" ");
   }
 }
+
+void format_vruntime(uint vruntime_overflow, uint vruntime) {
+  int MAX_ARRAY[10] = { 2, 1, 4, 7, 4, 8, 3, 6, 4, 7};
+  // 100의 자릿수 까지 출력 (제한 확장가능-동적할당 but 시간적 제약)
+  int output[100] = {0};
+  int len = 10;
+  uint copy = vruntime_overflow;
+  uint digit;
+  int cnt = 0;
+  int mul, carry, left;
+  int i;
+  // vruntime_overflow 처리
+  while (copy != 0) {
+		digit = copy % 10;
+		for (i = len - 1; i >= 0; i--) {
+			mul = MAX_ARRAY[i] * digit;
+			left = mul % 10;
+			carry = mul / 10;
+			output[cnt + len - i -1] += left;
+			output[cnt + len - i] += carry;
+		}
+		copy /= 10;
+		cnt++;		
+	}
+
+  // vruntime 처리
+  i = 0;
+  while (vruntime > 0) {
+		output[i++] += vruntime % 10;
+		vruntime /= 10;
+	}
+
+  // output 처리  
+	int output_len = cnt + len - 1;
+	for (i = 0; i < cnt + len - 1; i++) {
+		if (output[i] >= 10) {
+			if (i == output_len - 1) {
+				output_len++;
+			}
+			output[i + 1] += output[i] / 10;
+		}
+		output[i] %= 10;
+	}
+
+  //출력
+  for (i = output_len - 1; i >= 0; i--) {
+		cprintf("%d", output[i]);
+	}
+}
 //ps systemcall
 // PA2
 void ps(int pid)
@@ -794,8 +835,7 @@ void ps(int pid)
       /* 3 */ "priority",
       /* 4 */ "runtime/weight",
       /* 5 */ "runtime",
-      /* 6 */ "vruntime",
-      /* 7 */ "tick"      
+      /* 6 */ "vruntime",           
     };  
 
     struct proc *p;
@@ -816,7 +856,7 @@ void ps(int pid)
               // cprintf("tick %d\n",ticks*1000);
 
               //임시코드
-              format_string("timeslice",25);
+              //format_string("timeslice",25);
               
               cprintf("tick %d\n",ticks*1000);
               cnt++;              
@@ -827,9 +867,16 @@ void ps(int pid)
               format_string(states[p->state],15);
               format_int(p->nice,15);
               format_int(p->sum_runtime / p->weight,20);
-              format_int(p->sum_runtime,15);
-              format_int(p->vruntime,20);
-              format_int(p->timeslice,20);
+              format_int(p->sum_runtime,15);              
+              if(p->vruntime_overflow == 0)
+                format_int(p->vruntime,20);
+              else {
+                format_vruntime(p->vruntime_overflow, p->vruntime);
+                //cprintf("         ");
+                }
+              //임시코드
+              //format_int(p->timeslice,20);
+              //cprintf("vruntime_overflow : %d, vruntime : %d",p->vruntime_overflow,p->vruntime);
               cprintf("\n");              
             }
         }    

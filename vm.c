@@ -310,8 +310,8 @@ clearpteu(pde_t *pgdir, char *uva)
   *pte &= ~PTE_U;
 }
 
-// Given a parent process's page table, create a copy
-// of it for a child.
+// Given a parent process's page table, create a copy of it for a child.
+// pgdir: parent page table, sz: page table size
 pde_t*
 copyuvm(pde_t *pgdir, uint sz)
 {
