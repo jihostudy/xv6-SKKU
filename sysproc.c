@@ -127,3 +127,23 @@ sys_ps(void)
   ps(pid);
   return 0;
 }
+
+//mmap
+int 
+sys_mmap(void)
+{
+  int addr, length, prot, flages, fd, offset;
+  if(argint(0, &addr) < 0)
+    return 0;
+  if(argint(1, &length) < 0)
+    return 0;
+  if(argint(2, &prot) < 0)
+    return 0;
+  if(argint(3, &flags) < 0)
+    return 0;
+  if(argint(4, &fd) < 0)
+    return 0;
+  if(argint(5, &offset) < 0)
+    return 0;
+  return mmap(addr, length, prot, flages, fd, offset);
+}
