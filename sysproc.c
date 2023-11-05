@@ -131,19 +131,26 @@ sys_ps(void)
 //mmap
 int 
 sys_mmap(void)
-{
-  int addr, length, prot, flages, fd, offset;
+{  
+  int addr, length, prot, flags, fd, offset;
   if(argint(0, &addr) < 0)
     return 0;
+  cprintf("sysproc correctly done!\n");
   if(argint(1, &length) < 0)
     return 0;
+  cprintf("sysproc correctly done!\n");
   if(argint(2, &prot) < 0)
     return 0;
+  cprintf("sysproc correctly done!\n");
   if(argint(3, &flags) < 0)
     return 0;
+  cprintf("sysproc correctly done!\n");
   if(argint(4, &fd) < 0)
     return 0;
+  cprintf("sysproc correctly done!\n");
   if(argint(5, &offset) < 0)
     return 0;
-  return mmap(addr, length, prot, flages, fd, offset);
+  cprintf("sysproc correctly done!\n");
+  
+  return mmap(addr, length, prot, flags, fd, offset);
 }

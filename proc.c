@@ -6,14 +6,18 @@
 #include "x86.h"
 #include "proc.h"
 #include "spinlock.h"
-
-
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
 
 struct {
   struct spinlock lock;
   struct proc proc[NPROC];
 } ptable;
 
+// mmap_area 배열
+struct mmap_area MMA[MAX_MMAP];
+int nprocess = 0;
 // vruntime maximum limit (int 기준)
 uint VRUNTIME_MAX = 2147483647;
 
@@ -246,6 +250,22 @@ fork(void)
   np->vruntime = curproc->vruntime;
   // np->sum_runtime = 0;
   // np->runtime = 0;
+
+  if(nprocess == 0){
+    for(i = 0; i < MAX_MMAP; i++){
+      MMA[i].f = 0;
+      MMA[i].addr = 0;
+      MMA[i].length = 0;
+      MMA[i].offset = 0;
+      MMA[i].prot = 0;
+      MMA[i].flags = 0;
+      MMA[i].p = 0;
+      MMA[i].pt_exist = 0;
+    }
+    nprocess = 1;
+  }
+
+
   *np->tf = *curproc->tf;
 
   // Clear %eax so that fork returns 0 in the child.
@@ -884,3 +904,121 @@ void ps(int pid)
     release(&ptable.lock);
 }
 
+// mmap systemcall
+uint mmap(uint addr, int length, int prot, int flags, int fd, int offset) 
+  {    
+  struct proc* p = myproc();  
+  int npage = length / PGSIZE; // number of page
+  return 1;
+  // 매핑 시작 주소
+  uint mmap_addr = addr + 0x40000000;
+
+  // 사용할 파일
+  struct file *f = 0;
+  if(fd == -1){
+    f = 0; // not used(임의의 값)
+  }
+  else {    
+    f = filedup(p->ofile[fd]);    
+  }
+  
+  // Fail : return 0하는 경우들
+  // 1. Not Anoymous + fd = -1  
+  if(((flags & MAP_ANONYMOUS) == 0) && (fd == -1)){
+    return 0;
+  }
+  // 2. Protection of file != prot
+  if((flags & MAP_ANONYMOUS) == 1) {
+    // READ BUT CANNOTREAD
+    if((prot & PROT_READ) && (f->readable == 0)){
+      return 0;
+    }
+    // WRITE BUT CANNOTWRITE
+    if((prot & PROT_WRITE) && (f->writable == 0)){
+      return 0;
+    }
+  }
+  // 3. Mapping Area is overlapped is not considered
+  // find empty space of MMA
+  int i = 0;
+  struct mmap_area *ptr;
+  
+  while(1){
+    ptr = &MMA[i];
+    if(ptr->pt_exist == 0){
+      cprintf("MMA[%d]는 pt가 존재합니다\n",i);
+      break;
+    }
+    // End of Array
+    if(i == (MAX_MMAP-1)) {
+      return 0;
+    }
+    i++;
+  }  
+  
+  // CASE HANDLING
+  if(flags == MAP_ANONYMOUS) {
+    return mmap_addr;
+  }
+  else {
+    MMA[i].f = f;
+    MMA[i].addr = mmap_addr;
+    MMA[i].length = length;
+    MMA[i].offset = offset;
+    MMA[i].prot = prot;
+    MMA[i].flags = flags;
+    MMA[i].p = p;
+
+    MMA[i].pt_exist = 1; // 여기 존재해요~
+    
+    // 1. MAP_ANONYMOUS | MAP_POPULATE : 0으로 매핑(no file read)
+    if(flags == (MAP_ANONYMOUS | MAP_POPULATE)) {
+      char* memory = 0;
+      f->off = offset;
+      for(i = 0; i < npage; i++) {
+        // physical memory allocated
+        memory = kalloc();      
+        if(!memory) 
+          return 0;      
+        memset(memory, 0, PGSIZE);
+
+        //No reading from file -> all set to 0
+        
+        // virtual address -> page table -> physical memory mapping
+        if(mappages(p->pgdir, (void*)(mmap_addr + PGSIZE * i), PGSIZE, V2P(memory), prot|PTE_U) == -1)
+          return 0;
+      }
+    }
+    // 2. MAP_POPULATE (0x2)
+    /*      
+      1. virtual memory에 mmaped region 할당
+      2. physical memory에 npage개의 page 받기
+      3. fd의 offset위치부터 npage개의  page 읽기
+      4. page table을 통해 매핑해주기
+    */
+    else if(flags == MAP_POPULATE) {
+      uint save_offset = f->off;
+      f->off = offset;    
+      for(i = 0; i < npage; i++){
+        memeory = kalloc();    
+        if(!memeory) 
+          return 0;
+        memset(mem, 0, PGSIZE);           
+        
+        fileread(f, memory, PGSIZE); // read from file!!!
+        if(mappages(p->pgdir, (void*)(mmap_addr + PGSIZE * i), PGSIZE, V2P(memory), prot|PTE_U) == -1)
+          return 0;    
+      }      
+      f->off = save_offset; // 원래 file offset 복원
+    }      
+    // 4. file mapping + just recording its mapping area(0x0)
+    /*
+      1. 일단 MMA에 넣어둔다(완)
+      2. Page fault handler가 page table을 생성하는데 사용한다.
+    */
+    else if(flags == 0) {
+      return mmap_addr;
+    }
+  }
+  return mmap_addr;
+}

@@ -187,6 +187,7 @@ UPROGS=\
 	_mytest\
 	_mytest2\
 	_mytest3\
+	_mmap\
 
 fs.img: mkfs README $(UPROGS)
 	./mkfs fs.img README $(UPROGS)

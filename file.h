@@ -1,11 +1,17 @@
 struct file {
+  /*
+  FD_NONE : 빈 파일 디스크립터
+  FD_PIPE : 파이프를 가리키는 디스크립터
+  FD_INODE : 파일을 가리키는 디스크립터
+  */
   enum { FD_NONE, FD_PIPE, FD_INODE } type;
-  int ref; // reference count
-  char readable;
-  char writable;
-  struct pipe *pipe;
-  struct inode *ip;
-  uint off;
+  
+  int ref; // 참조 횟수
+  char readable; // 0 : 불가능  1 : 가능 
+  char writable; // 0 : 불가능  1: 가능
+  struct pipe *pipe; // 파이프의 경우, 파이프에 대한 포인터
+  struct inode *ip; // 파일의 경우, 파일에 대한 포인터
+  uint off; // 파일 디스크립터의 현재 OFFSET (읽거나 쓸때 사용된다)
 };
 
 

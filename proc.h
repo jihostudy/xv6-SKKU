@@ -48,7 +48,7 @@ struct proc {
   struct context *context;     // swtch() here to run process
   void *chan;                  // If non-zero, sleeping on chan
   int killed;                  // If non-zero, have been killed
-  struct file *ofile[NOFILE];  // Open files
+  struct file *ofile[NOFILE];  // 열린 파일에 대한 파일 디스크립터 배열
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 
@@ -68,3 +68,16 @@ struct proc {
 //   original data and bss
 //   fixed-size stack
 //   expandable heap
+
+// mmap 배열을 만들기 위한 구조체
+struct mmap_area {
+  struct file *f;
+  uint addr;
+  int length;
+  int offset;
+  int prot;
+  int flags;
+  struct proc *p;
+
+  int pt_exist;
+};

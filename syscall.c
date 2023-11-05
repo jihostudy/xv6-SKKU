@@ -133,7 +133,7 @@ static int (*syscalls[])(void) = {
 [SYS_getnice] sys_getnice,
 [SYS_setnice] sys_setnice,
 [SYS_ps]      sys_ps,
-[SYS_mmap]      sys_mmap,
+[SYS_mmap]    sys_mmap,
 };
 
 void

@@ -57,6 +57,7 @@ walkpgdir(pde_t *pgdir, const void *va, int alloc)
 // Create PTEs for virtual addresses starting at va that refer to
 // physical addresses starting at pa. va and size might not
 // be page-aligned.
+// 가상주소 va ~ va + size만큼을 물리주소 pa로 매핑
 static int
 mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm)
 {
