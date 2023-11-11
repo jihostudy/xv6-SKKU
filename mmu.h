@@ -97,8 +97,8 @@ struct segdesc {
 #define PTE_PS          0x080   // Page Size
 
 // Address in page table or page directory entry
-#define PTE_ADDR(pte)   ((uint)(pte) & ~0xFFF)
-#define PTE_FLAGS(pte)  ((uint)(pte) &  0xFFF)
+#define PTE_ADDR(pte)   ((uint)(pte) & ~0xFFF) // 상위 20비트
+#define PTE_FLAGS(pte)  ((uint)(pte) &  0xFFF) // 하위 12비트
 
 #ifndef __ASSEMBLER__
 typedef uint pte_t;

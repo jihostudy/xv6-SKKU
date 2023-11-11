@@ -69,6 +69,8 @@ void            kfree(char*);
 void            kinit1(void*, void*);
 void            kinit2(void*, void*);
 
+int             freed_mem_count(void);
+
 // kbd.c
 void            kbdintr(void);
 
@@ -124,6 +126,9 @@ int             getnice(int);
 int             setnice(int, int);
 void            ps(int);
 uint            mmap(uint, int, int, int, int, int);
+int             page_fault_handler(uint, uint);
+int             munmap(uint);
+int             freemem(void);
 
 // swtch.S
 void            swtch(struct context**, struct context*);
@@ -189,6 +194,10 @@ void            switchuvm(struct proc*);
 void            switchkvm(void);
 int             copyout(pde_t*, uint, void*, uint);
 void            clearpteu(pde_t *pgdir, char *uva);
+
+// mmap을 위해 추가함 scall
+pte_t*          walkpgdir(pde_t *pgdir, const void *va, int alloc);
+int             mappages(pde_t *pgdir, void *va, uint size, uint pa, int perm);
 
 // number of elements in fixed-size array
 #define NELEM(x) (sizeof(x)/sizeof((x)[0]))

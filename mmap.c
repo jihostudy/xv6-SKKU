@@ -1,23 +1,14 @@
 #include "types.h"
-#include "user.h"
 #include "stat.h"
-#include "param.h"
+#include "user.h"
 #include "fcntl.h"
+#include "param.h"
 
-int
-main(int argc, char **argv)
+int main(int argc, char **argv)
 {
-    if(argc != 7) {
-        printf(2,"need input pid");
-        exit();
-    }
-
-    int fd = open("README",O_RDWR);
-    printf(2,"File Used is %d\n",fd);
-
-    uint test = mmap(0, 4096, PROT_READ|PROT_WRITE,MAP_POPULATE, fd, 0);
-    printf(2,"Test : %d\n",test);
-    uint test2 = mmap(atoi(argv[0]), atoi(argv[1]), atoi(argv[2]),atoi(argv[3]), atoi(argv[4]),atoi(argv[5])); 
-    printf(2, "Test2 : %d\n", test2);
-    exit();
+    printf(1,"XV6를 과제로 내주는건 정말 너무하다고 생각합니다\n");
+    printf(1,"이게 정말 최선이었나요?ㅠㅠㅠㅠ\n");
+    printf(1,"너무해요 저진짜 ... 구글검색창 최근 1주가 전부 메모리관련된거에요\n");
+    printf(1,"그래도 저도 했으니 다음 학기도 합시다\n하하하하하핳");
 }
+

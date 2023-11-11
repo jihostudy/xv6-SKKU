@@ -13,6 +13,7 @@ void freerange(void *vstart, void *vend);
 extern char end[]; // first address after kernel loaded from ELF file
                    // defined by the kernel linker script in kernel.ld
 
+
 struct run {
   struct run *next;
 };
@@ -23,6 +24,7 @@ struct {
   struct run *freelist;
 } kmem;
 
+uint freed_mem;
 // Initialization happens in two phases.
 // 1. main() calls kinit1() while still using entrypgdir to place just
 // the pages mapped by entrypgdir on free list.
@@ -33,6 +35,7 @@ kinit1(void *vstart, void *vend)
 {
   initlock(&kmem.lock, "kmem");
   kmem.use_lock = 0;
+  freed_mem = 0; // free 한 memory 개수 count
   freerange(vstart, vend);
 }
 
@@ -53,6 +56,7 @@ freerange(void *vstart, void *vend)
 }
 //PAGEBREAK: 21
 // Free the page of physical memory pointed at by v,
+// By v : v 가 point하는 physical memory라는 뜻
 // which normally should have been returned by a
 // call to kalloc().  (The exception is when
 // initializing the allocator; see kinit above.)
@@ -66,7 +70,7 @@ kfree(char *v)
 
   // Fill with junk to catch dangling refs.
   memset(v, 1, PGSIZE);
-
+  
   if(kmem.use_lock)
     acquire(&kmem.lock);
   r = (struct run*)v;
@@ -74,6 +78,8 @@ kfree(char *v)
   kmem.freelist = r;
   if(kmem.use_lock)
     release(&kmem.lock);
+
+  freed_mem++;
 }
 
 // Allocate one 4096-byte page of physical memory.
@@ -82,7 +88,7 @@ kfree(char *v)
 char*
 kalloc(void)
 {
-  struct run *r;
+  struct run *r;  
 
   if(kmem.use_lock)
     acquire(&kmem.lock);
@@ -91,6 +97,11 @@ kalloc(void)
     kmem.freelist = r->next;
   if(kmem.use_lock)
     release(&kmem.lock);
+
+  freed_mem--;
   return (char*)r;
 }
 
+int freed_mem_count(void) {
+  return freed_mem;
+}

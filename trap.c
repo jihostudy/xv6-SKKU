@@ -17,8 +17,6 @@ extern uint vectors[];  // in vectors.S: array of 256 entry pointers
 struct spinlock tickslock;
 uint ticks;
 
-
-
 void
 tvinit(void)
 {
@@ -40,9 +38,7 @@ idtinit(void)
 //PAGEBREAK: 41
 void
 trap(struct trapframe *tf)
-{
-  
-  
+{ 
   if(tf->trapno == T_SYSCALL){
     if(myproc()->killed)
       exit();
@@ -51,9 +47,7 @@ trap(struct trapframe *tf)
     if(myproc()->killed)
       exit();
     return;
-  }
-
-  
+  } 
 
   switch(tf->trapno){
   case T_IRQ0 + IRQ_TIMER:
@@ -62,9 +56,7 @@ trap(struct trapframe *tf)
       ticks++;
       wakeup(&ticks);
       release(&tickslock);
-    }  
-    
-    
+    } 
     lapiceoi();
     break;
   case T_IRQ0 + IRQ_IDE:
@@ -88,7 +80,12 @@ trap(struct trapframe *tf)
             cpuid(), tf->cs, tf->eip);
     lapiceoi();
     break;
-
+  // rc2() : x86.h
+  case T_PGFLT:
+    cprintf("page fault occured!\n");
+    if(page_fault_handler(rcr2(), tf->err&2) != -1){
+      break;
+    }
   //PAGEBREAK: 13
   default:
     if(myproc() == 0 || (tf->cs&3) == 0){

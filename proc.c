@@ -113,7 +113,7 @@ allocproc(void)
 {
   struct proc *p;
   char *sp;
-
+  int i;
   acquire(&ptable.lock);
 
   for(p = ptable.proc; p < &ptable.proc[NPROC]; p++)
@@ -135,6 +135,20 @@ found:
   p->vruntime_overflow = 0;
   p->timeslice = 0;
   
+  if(nprocess == 0){
+    for(i = 0; i < MAX_MMAP; i++){
+      MMA[i].f = 0;
+      MMA[i].addr = 0;
+      MMA[i].length = 0;
+      MMA[i].offset = 0;
+      MMA[i].prot = 0;
+      MMA[i].flags = 0;
+      MMA[i].p = 0;
+      MMA[i].pt_exist = 0;
+    }
+    nprocess = 1;
+  }
+
   release(&ptable.lock);
 
   // Allocate kernel stack.
@@ -229,7 +243,7 @@ fork(void)
   int i, pid;
   struct proc *np;
   struct proc *curproc = myproc();
-
+  //cprintf("fork 진입\n");
   // Allocate process.
   if((np = allocproc()) == 0){
     return -1;
@@ -251,23 +265,7 @@ fork(void)
   // np->sum_runtime = 0;
   // np->runtime = 0;
 
-  if(nprocess == 0){
-    for(i = 0; i < MAX_MMAP; i++){
-      MMA[i].f = 0;
-      MMA[i].addr = 0;
-      MMA[i].length = 0;
-      MMA[i].offset = 0;
-      MMA[i].prot = 0;
-      MMA[i].flags = 0;
-      MMA[i].p = 0;
-      MMA[i].pt_exist = 0;
-    }
-    nprocess = 1;
-  }
-
-
   *np->tf = *curproc->tf;
-
   // Clear %eax so that fork returns 0 in the child.
   np->tf->eax = 0;
 
@@ -278,13 +276,91 @@ fork(void)
 
   safestrcpy(np->name, curproc->name, sizeof(curproc->name));
 
-  pid = np->pid;
+  pid = np->pid;  
 
   acquire(&ptable.lock);
 
   np->state = RUNNABLE;
 
   release(&ptable.lock);
+
+  // fork시 자식은 부모와 같은 page table을 가지며, 가질시 physical memory할당 해주기
+  int mma_location = 0;
+  for(i = 0; i < MAX_MMAP; i++){
+    // curproc MMA 찾기
+    if(MMA[i].p == curproc){
+      // MMA 에서 남은 자리 찾기 
+      for(mma_location = 0; mma_location < MAX_MMAP; mma_location++) {
+        if(MMA[mma_location].pt_exist == 0) {
+          //cprintf("fork에서 : mma_location : %d\n",mma_location);
+          break;
+        }
+      }
+      //cprintf("여기 실행됨\n");
+      // MMA 할당시켜주기
+      MMA[mma_location] = MMA[i];
+      MMA[mma_location].p = np;
+
+      // 할당 편하게 해주려고
+      struct file* f = MMA[mma_location].f;
+      uint addr = MMA[mma_location].addr;
+      int length = MMA[mma_location].length;
+      int offset = MMA[mma_location].offset;
+      int prot = MMA[mma_location].prot;
+      int flags = MMA[mma_location].flags;
+      struct proc* p = MMA[mma_location].p;
+
+      int npage = length / PGSIZE; // number of page  
+      char* memory = 0;
+      int cnt;
+      // file read하는 경우 : MAP_ANONYMOUS가 없는 경우
+      // MAP_POPULATE  or  0
+      if((flags == 0) || (flags == 2)) 
+      {        
+        uint save_offset = f->off;
+        f->off = offset;    
+
+        for(cnt = 0; cnt < npage; cnt++){
+          memory = kalloc();    
+          if(!memory){
+            //cprintf("메모리 부족\n");
+            return 0;
+          }
+          memset(memory, 0, PGSIZE);                   
+          fileread(f, memory, PGSIZE); // read from file!!!
+          
+          if(mappages(p->pgdir, (void*)(addr + PGSIZE * cnt), PGSIZE, V2P(memory), prot|PTE_U) == -1){
+            //cprintf("ptable 생성실패\n");
+            kfree(memory);
+            return 0;    
+          }
+        }      
+        f->off = save_offset; // 원래 file offset 복원
+        
+      }
+
+      // file read하지 않는 경우
+      // MAP_ANONYMOUS or MAP_ANONYMOUS || MAP_POPULATE
+      else if((flags == 1) || (flags == 3)) 
+      {
+        for(cnt = 0; cnt < npage; cnt++){
+          memory = kalloc();    
+          if(!memory){
+            //cprintf("메모리 부족\n");
+            return 0;
+          }
+          memset(memory, 0, PGSIZE);        
+          
+          if(mappages(p->pgdir, (void*)(addr + PGSIZE * cnt), PGSIZE, V2P(memory), prot|PTE_U) == -1){
+            //cprintf("ptable 생성실패\n");
+            kfree(memory);
+            return 0;    
+          }
+        }      
+        
+      }
+    }
+  }
 
   return pid;
 }
@@ -906,10 +982,10 @@ void ps(int pid)
 
 // mmap systemcall
 uint mmap(uint addr, int length, int prot, int flags, int fd, int offset) 
-  {    
+{    
+  int i;
   struct proc* p = myproc();  
-  int npage = length / PGSIZE; // number of page
-  return 1;
+  int npage = length / PGSIZE; // number of page  
   // 매핑 시작 주소
   uint mmap_addr = addr + 0x40000000;
 
@@ -928,7 +1004,7 @@ uint mmap(uint addr, int length, int prot, int flags, int fd, int offset)
     return 0;
   }
   // 2. Protection of file != prot
-  if((flags & MAP_ANONYMOUS) == 1) {
+  if((flags & MAP_ANONYMOUS) == 0) {
     // READ BUT CANNOTREAD
     if((prot & PROT_READ) && (f->readable == 0)){
       return 0;
@@ -938,55 +1014,69 @@ uint mmap(uint addr, int length, int prot, int flags, int fd, int offset)
       return 0;
     }
   }
+
+  
   // 3. Mapping Area is overlapped is not considered
   // find empty space of MMA
-  int i = 0;
+  int mma_location = 0;
   struct mmap_area *ptr;
   
-  while(1){
-    ptr = &MMA[i];
-    if(ptr->pt_exist == 0){
-      cprintf("MMA[%d]는 pt가 존재합니다\n",i);
+  for(mma_location = 0; mma_location < MAX_MMAP; mma_location++){
+    ptr = &MMA[mma_location];
+    if(ptr->pt_exist == 0){      
       break;
-    }
-    // End of Array
-    if(i == (MAX_MMAP-1)) {
-      return 0;
-    }
-    i++;
-  }  
-  
+    }        
+  }
+  // End of Array
+  if(mma_location == (MAX_MMAP-1)) {
+    return 0;
+  }    
+  //cprintf("찾은 자리 : MMA[%d]\n",mma_location);
+
+  MMA[mma_location].f = f;
+  MMA[mma_location].addr = mmap_addr;
+  MMA[mma_location].length = length;
+  MMA[mma_location].offset = offset;
+  MMA[mma_location].prot = prot;
+  MMA[mma_location].flags = flags;
+  MMA[mma_location].p = p;
+
+  MMA[mma_location].pt_exist = 1; // 여기 존재해요~
+
+
   // CASE HANDLING
-  if(flags == MAP_ANONYMOUS) {
+  if((flags == MAP_ANONYMOUS) || (flags == 0)) {
+    //cprintf("Entered flags == MAP_ANONYMOUS || 0\n");
     return mmap_addr;
   }
   else {
-    MMA[i].f = f;
-    MMA[i].addr = mmap_addr;
-    MMA[i].length = length;
-    MMA[i].offset = offset;
-    MMA[i].prot = prot;
-    MMA[i].flags = flags;
-    MMA[i].p = p;
-
-    MMA[i].pt_exist = 1; // 여기 존재해요~
-    
-    // 1. MAP_ANONYMOUS | MAP_POPULATE : 0으로 매핑(no file read)
+    // 1. MAP_ANONYMOUS | MAP_POPULATE : 0으로 매핑(no file read) (0x3)
     if(flags == (MAP_ANONYMOUS | MAP_POPULATE)) {
-      char* memory = 0;
-      f->off = offset;
+      //cprintf("Entered flags == (MAP_ANONYMOUS | MAP_POPULATE)\n");
+      char* memory = 0;      
       for(i = 0; i < npage; i++) {
         // physical memory allocated
         memory = kalloc();      
-        if(!memory) 
+        if(!memory) {
+          //cprintf("메모리 부족\n");
           return 0;      
+        }
         memset(memory, 0, PGSIZE);
 
         //No reading from file -> all set to 0
         
         // virtual address -> page table -> physical memory mapping
-        if(mappages(p->pgdir, (void*)(mmap_addr + PGSIZE * i), PGSIZE, V2P(memory), prot|PTE_U) == -1)
+        // V2P(memory) : physical address 반환
+        // Page table/directory entry flags.
+        // #define PTE_P           0x001   // Present
+        // #define PTE_W           0x002   // Writeable
+        // #define PTE_U           0x004   // User
+        // #define PTE_PS          0x080   // Page Size
+        if(mappages(p->pgdir, (void*)(mmap_addr + PGSIZE * i), PGSIZE, V2P(memory), prot|PTE_U) == -1){
+          //cprintf("ptable 생성실패\n");
+          kfree(memory);
           return 0;
+        }          
       }
     }
     // 2. MAP_POPULATE (0x2)
@@ -997,28 +1087,139 @@ uint mmap(uint addr, int length, int prot, int flags, int fd, int offset)
       4. page table을 통해 매핑해주기
     */
     else if(flags == MAP_POPULATE) {
+      //cprintf("Entered flags == MAP_POPULATE\n");
+      char* memory = 0;
       uint save_offset = f->off;
       f->off = offset;    
       for(i = 0; i < npage; i++){
-        memeory = kalloc();    
-        if(!memeory) 
+        memory = kalloc();    
+        if(!memory){
+          //cprintf("메모리 부족\n");
           return 0;
-        memset(mem, 0, PGSIZE);           
-        
+        } 
+          
+        memset(memory, 0, PGSIZE);                   
         fileread(f, memory, PGSIZE); // read from file!!!
-        if(mappages(p->pgdir, (void*)(mmap_addr + PGSIZE * i), PGSIZE, V2P(memory), prot|PTE_U) == -1)
+        
+        if(mappages(p->pgdir, (void*)(mmap_addr + PGSIZE * i), PGSIZE, V2P(memory), prot|PTE_U) == -1){
+          //cprintf("ptable 생성실패\n");
+          kfree(memory);
           return 0;    
+        }
       }      
       f->off = save_offset; // 원래 file offset 복원
-    }      
-    // 4. file mapping + just recording its mapping area(0x0)
-    /*
-      1. 일단 MMA에 넣어둔다(완)
-      2. Page fault handler가 page table을 생성하는데 사용한다.
-    */
-    else if(flags == 0) {
-      return mmap_addr;
+    }          
+  }  
+  //cprintf("addr : %d, length : %d, offset : %d, prot : %d, flags : %d\n",
+  //MMA[mma_location].addr, MMA[mma_location].length, MMA[mma_location].offset, MMA[mma_location].prot, MMA[mma_location].flags);
+  return mmap_addr;
+}
+
+int page_fault_handler(uint fault_virtual_addr, uint err) {
+  /*
+    return 0: 정상 종료 + 할당 실패
+    return 1: 교안의 Error Handling
+  */
+  struct proc *p = myproc();
+
+  // #3.find the process in mmap_area
+  int i;  
+  struct mmap_area target;
+  for(i = 0; i < MAX_MMAP; i++){
+    if((MMA[i].addr <= fault_virtual_addr) && (fault_virtual_addr <= (MMA[i].addr + MMA[i].length)) && (MMA[i].p == p)) {      
+      target = MMA[i];
+      break;
     }
   }
-  return mmap_addr;
+  if(i == MAX_MMAP){
+    //cprintf("Cannot find page faulted process!\n");
+    return -1;
+  }
+  
+  int npage = target.length / PGSIZE; // number of page  
+  int j; // page번호 찾기
+  for(j = 0; j < npage; j++){
+    if((target.addr + j * PGSIZE <= fault_virtual_addr) && (fault_virtual_addr <= target.addr + (j+1) * PGSIZE)){
+      break;
+    }
+  }
+    
+  // #4. If fault was write while mmap_area is write prohibited
+  if(((target.prot & PROT_WRITE) == 0) && (err == 1)) {
+    return -1;
+  }
+
+  
+  char* memory = 0;
+  memory = kalloc();
+  if(memory == 0) {
+    return 0;
+  }
+  memset(memory, 0, PGSIZE); // 0으로 채우기
+
+  // If file mapping, read file into the physical page with offset
+  if((target.flags & MAP_ANONYMOUS) == 0){    
+    struct file* f = MMA[i].f;    
+    fileread(f, memory, PGSIZE);
+  }
+  // PROT_WRITE -> PTE_W SHOULD BE IN PTE VALUE
+  if((target.prot & PROT_WRITE) != 0){
+    //cprintf("Entered write here!\n");
+    if(mappages(p->pgdir, (void *)(target.addr + j * PGSIZE), PGSIZE, V2P(memory), target.prot | PTE_W | PTE_U) == -1){
+      kfree(memory);
+      return -1;
+    }
+  }
+  // NO PROT_WRITE
+  else {
+    //cprintf("Entered no_write here!\n");
+    if(mappages(p->pgdir, (void *)(target.addr + j * PGSIZE), PGSIZE, V2P(memory), target.prot | PTE_U) == -1)
+    return -1;
+  }  
+
+  return 0;
+}
+
+int munmap(uint addr)
+{
+  int i;
+  struct proc *p = myproc();
+
+  // 해당 프로세스의 MMA 위치 찾기
+  int mma_location;  
+  for(mma_location = 0; mma_location < MAX_MMAP; mma_location++) {
+    if((MMA[mma_location].p == p) && (MMA[mma_location].addr == addr)){
+      
+      break;
+    }
+  }  
+  //cprintf("munmap : Found mma_location : %d\n");
+  // #2. If there is no mmap_area process starting width an address, return -1
+  if(mma_location == MAX_MMAP){
+    //cprintf("Cannot find page faulted process!\n");
+    return -1;
+  }
+  int npage = MMA[mma_location].length / PGSIZE; // number of page  
+    
+   
+  for(i = 0; i < npage; i++) {
+    pte_t* pt_address = walkpgdir(p->pgdir, (void *)(MMA[mma_location].addr + i * PGSIZE), 0);
+    //cprintf("walkpgdir 성공적으로 했음\n");
+    // page table 없음
+    if((pt_address != 0) && (*pt_address & PTE_P)){
+      char * v_addr = P2V(PTE_ADDR(*pt_address));
+      memset(v_addr, 1, PGSIZE);
+      kfree(v_addr); // free physical page
+      // free physical table
+      *pt_address = 0;    
+    }     
+  }
+
+  switchuvm(p);
+  return 1;
+}
+
+int freemem(void) 
+{
+  return freed_mem_count();
 }
