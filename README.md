@@ -21,7 +21,7 @@ average: 48.1/100
 
 score: 100/100
 ## Project4: Implementing Virtual Memory Management
-Implement three system alls and page fault handler on xv6
+Implement three system calls and page fault handler on xv6
 1. mmap() syscall
 2. Page fault handler
 3. munmap() syscall
