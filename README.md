@@ -1,4 +1,4 @@
-# SKKU OS xv6 Assigments(2023f)
+# SKKU OS xv6 Assigments(2023f) - A+
 ## Project1: Booting Message
 Print StudentID, Name, message on boot message
 
